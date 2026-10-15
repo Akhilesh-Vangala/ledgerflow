@@ -1,0 +1,22 @@
+# .NET
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+.vs/
+*.trx
+coverage*.xml
+
+# Angular (the production build lands in the API's wwwroot)
+web/node_modules/
+web/.angular/
+web/dist/
+src/LedgerFlow.Api/wwwroot/
+
+# Local secrets and tooling
+.env
+*.local.json
+appsettings.*.local.json
+.DS_Store
+.idea/
