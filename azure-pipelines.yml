@@ -66,6 +66,7 @@ stages:
             displayName: Install .NET SDK from global.json
             inputs:
               useGlobalJson: true
+              workingDirectory: backend
 
           - task: NodeTool@0
             displayName: Install Node 20
@@ -75,23 +76,25 @@ stages:
           - task: Cache@2
             displayName: Cache NuGet packages
             inputs:
-              key: 'nuget | "$(Agent.OS)" | Directory.Packages.props | **/*.csproj'
+              key: 'nuget | "$(Agent.OS)" | backend/Directory.Packages.props | backend/**/*.csproj'
               path: $(NUGET_PACKAGES)
 
           - task: Cache@2
             displayName: Cache npm
             inputs:
-              key: 'npm | "$(Agent.OS)" | web/package-lock.json'
+              key: 'npm | "$(Agent.OS)" | frontend/package-lock.json'
               path: $(npm_config_cache)
 
           - script: dotnet restore LedgerFlow.sln -p:UseTelerik=$(UseTelerik)
             displayName: dotnet restore
+            workingDirectory: backend
             env:
               TELERIK_NUGET_USER: api-key
               TELERIK_NUGET_KEY: $(TelerikNugetKey)
 
           - script: dotnet build LedgerFlow.sln -c $(buildConfiguration) --no-restore -p:UseTelerik=$(UseTelerik)
             displayName: dotnet build (warnings are errors)
+            workingDirectory: backend
             env:
               TELERIK_LICENSE: $(TelerikLicenseKey)
 
@@ -108,6 +111,7 @@ stages:
               --logger trx --results-directory $(Agent.TempDirectory)/tests
               --collect "XPlat Code Coverage"
             displayName: dotnet test (unit + integration)
+            workingDirectory: backend
             env:
               LEDGERFLOW_TEST_SQL: Server=127.0.0.1,1433;User Id=sa;Password=$(ciSqlPassword);TrustServerCertificate=True;Encrypt=True
 
@@ -126,18 +130,18 @@ stages:
 
           - script: npm ci
             displayName: npm ci
-            workingDirectory: web
+            workingDirectory: frontend
 
           - script: npm run test:ci
             displayName: Angular unit tests (headless Chrome)
-            workingDirectory: web
+            workingDirectory: frontend
 
           - script: npx ng build --configuration production
-            displayName: Angular build into API wwwroot
-            workingDirectory: web
+            displayName: Angular build into backend/src/LedgerFlow.Api/wwwroot
+            workingDirectory: frontend
 
           - script: >
-              dotnet publish src/LedgerFlow.Api/LedgerFlow.Api.csproj -c $(buildConfiguration) --no-restore
+              dotnet publish backend/src/LedgerFlow.Api/LedgerFlow.Api.csproj -c $(buildConfiguration) --no-restore
               -p:UseTelerik=$(UseTelerik) -o $(Build.ArtifactStagingDirectory)/api
             displayName: dotnet publish
             env:

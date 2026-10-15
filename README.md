@@ -57,33 +57,90 @@ flowchart LR
 
 The Angular app is served from the API's `wwwroot`, so the SPA, the Telerik viewer and the Hangfire dashboard share one origin and one HttpOnly, SameSite=Strict auth cookie. That means no CORS, no tokens in browser storage, and no separate static-site hosting.
 
+## Project structure
+
+The repository has two halves, each self-contained: `backend/` opens in Visual Studio 2022 as a normal .NET solution, and `frontend/` is a standard Angular CLI workspace.
+
 ```
-src/
-  LedgerFlow.Domain          Entities and business rules (no dependencies)
-  LedgerFlow.Application     Use cases, DTOs, FluentValidation, Hangfire job classes, report queries
-  LedgerFlow.Infrastructure  EF Core DbContext, migrations, Identity, Hangfire scheduler, Telerik renderer, seeding
-  LedgerFlow.Api             Controllers, auth, error handling, Hangfire dashboard, Telerik REST service, .trdx reports
-tests/
-  LedgerFlow.UnitTests         Domain rules and validators (xUnit)
-  LedgerFlow.IntegrationTests  Full HTTP tests against a real SQL Server (WebApplicationFactory)
-web/                         Angular 17 SPA (builds into src/LedgerFlow.Api/wwwroot)
-infra/                       Bicep for Azure SQL + App Service
-azure-pipelines.yml          Azure DevOps CI/CD
+ledgerflow/
+├── backend/                         .NET 9 solution (open LedgerFlow.sln)
+│   ├── LedgerFlow.sln
+│   ├── Directory.Build.props        shared compiler settings, analyzers, Telerik build switch
+│   ├── Directory.Packages.props     central NuGet versions
+│   ├── global.json                  pins the .NET 9 SDK
+│   ├── nuget.config                 nuget.org + Telerik feed (credentials from env vars)
+│   ├── src/
+│   │   ├── LedgerFlow.Domain/          entities and business rules, no dependencies
+│   │   │   ├── Common/                 Entity base, DomainException, Roles, ApprovalPolicy
+│   │   │   ├── Invoices/  Payments/  Vendors/  Operations/
+│   │   ├── LedgerFlow.Application/     use cases, one folder per feature
+│   │   │   ├── Abstractions/           ILedgerFlowDb, ICurrentUser, IJobScheduler, IReportRenderer
+│   │   │   ├── Invoices/               InvoiceService, DTOs, SaveInvoiceValidator
+│   │   │   ├── Payments/  Vendors/  Dashboard/  Notifications/  Reporting/
+│   │   │   └── Jobs/                   one class per Hangfire job + JobCatalog
+│   │   ├── LedgerFlow.Infrastructure/  EF Core, Identity, Hangfire, Telerik
+│   │   │   ├── Persistence/            DbContext, seeding
+│   │   │   │   ├── Configurations/     one IEntityTypeConfiguration per entity
+│   │   │   │   ├── Interceptors/       audit stamps
+│   │   │   │   └── Migrations/
+│   │   │   ├── Identity/  Jobs/  Reporting/
+│   │   └── LedgerFlow.Api/             ASP.NET Core host
+│   │       ├── Controllers/            one controller per resource
+│   │       ├── Hosting/                error handling, current user, Hangfire auth
+│   │       ├── Reports/                Telerik .trdx report definitions
+│   │       └── Program.cs
+│   └── tests/
+│       ├── LedgerFlow.UnitTests/         domain rules and validators (xUnit)
+│       └── LedgerFlow.IntegrationTests/  full HTTP tests against SQL Server (WebApplicationFactory)
+├── frontend/                        Angular 17 workspace (builds into backend/src/LedgerFlow.Api/wwwroot)
+│   └── src/app/
+│       ├── core/                    app-wide singletons, imported as @core/...
+│       │   ├── api/                 one typed service per API resource (InvoicesApi, VendorsApi, ...)
+│       │   ├── auth/                AuthService, guards, HTTP interceptor
+│       │   ├── http/                problem-details error helpers
+│       │   ├── models/              TypeScript contracts mirroring the API DTOs
+│       │   └── toast/
+│       ├── shared/                  reusable building blocks, imported as @shared/...
+│       │   ├── ui/                  status-badge/, pager/, loading/
+│       │   └── utils/
+│       ├── layout/shell/            sidebar, top bar, notifications
+│       ├── features/                one folder per business area, all lazy loaded
+│       │   ├── auth/login/
+│       │   ├── dashboard/
+│       │   ├── invoices/            invoice-list/, invoice-detail/, invoice-form/, invoices.routes.ts
+│       │   ├── approvals/approval-queue/
+│       │   ├── payment-runs/        payment-run-list/, payment-run-new/, payment-run-detail/, payment-runs.routes.ts
+│       │   ├── vendors/vendor-list/
+│       │   ├── reports/             report-center/, report-viewer/ (Telerik)
+│       │   └── jobs/job-list/
+│       ├── app.routes.ts  app.config.ts  app.component.ts
+├── infra/                           Bicep for Azure SQL + App Service
+├── docs/screenshots/
+├── docker-compose.yml               local SQL Server
+└── azure-pipelines.yml              Azure DevOps CI/CD
 ```
+
+Conventions:
+
+- **Backend:** one type per file, file-scoped namespaces that match folders, and unused `using` directives treated as build errors (`backend/.editorconfig`).
+- **Frontend:**
+  - Every component lives in its own folder with separate `.ts`, `.html` and `.scss` files.
+  - Features import shared code through the `@core`, `@shared`, `@features` and `@layout` path aliases, never through `../../`.
+  - Unused locals and parameters fail the build.
 
 ## Where each technology is used
 
 | Technology | Where |
 | --- | --- |
-| C# / .NET 9 | All of `src/` and `tests/`; `global.json` pins the 9.0 SDK. Nullable, analyzers and warnings-as-errors are on. |
-| ASP.NET Core Web API | `src/LedgerFlow.Api`: attribute-routed controllers, Identity API endpoints, rate-limited login, RFC 9457 problem details, OpenAPI + Scalar UI, health checks. |
-| EF Core | `src/LedgerFlow.Infrastructure/Persistence`: migrations, `rowversion` concurrency, keyless view entities, an audit interceptor, execution strategy plus transactions, `ExecuteUpdate`/`ExecuteDelete`. |
+| C# / .NET 9 | All of `backend/`; `backend/global.json` pins the 9.0 SDK. Nullable, analyzers and warnings-as-errors are on. |
+| ASP.NET Core Web API | `backend/src/LedgerFlow.Api`: attribute-routed controllers, Identity API endpoints, rate-limited login, RFC 9457 problem details, OpenAPI + Scalar UI, health checks. |
+| EF Core | `backend/src/LedgerFlow.Infrastructure/Persistence`: migrations, `rowversion` concurrency, keyless view entities, an audit interceptor, execution strategy plus transactions, `ExecuteUpdate`/`ExecuteDelete`. |
 | Azure SQL Server | Production database (`infra/main.bicep`, free offer by default). Locally, SQL Server 2022 in Docker. Reporting views are created by a migration. |
-| Hangfire | `Application/Jobs/Jobs.cs` (five recurring jobs plus a fire-and-forget decision notification), `Infrastructure/Jobs/HangfireJobScheduler.cs`, SQL Server storage, and a dashboard at `/hangfire` restricted to Controllers. |
-| Telerik Reporting | `Api/Reports/*.trdx`, `Api/Controllers/TelerikReportsController.cs` (REST service), `Infrastructure/Reporting/TelerikReportRenderer.cs` (PDF export), `web/src/app/pages/report-viewer.component.ts` (Angular viewer). |
-| Angular 17 + TypeScript | `web/`: standalone components, signals, `input()`/`output()`, built-in control flow, `@defer`, functional guards and interceptor, typed reactive forms. |
-| Bootstrap | Bootstrap 5.3 SCSS with a custom theme (`web/src/styles.scss`) plus Bootstrap Icons. |
-| VS 2022 | `LedgerFlow.sln` opens directly; the API is the startup project. |
+| Hangfire | `Application/Jobs/` (five recurring jobs plus a fire-and-forget decision notification), `Infrastructure/Jobs/HangfireJobScheduler.cs`, SQL Server storage, and a dashboard at `/hangfire` restricted to Controllers. |
+| Telerik Reporting | `Api/Reports/*.trdx`, `Api/Controllers/TelerikReportsController.cs` (REST service), `Infrastructure/Reporting/TelerikReportRenderer.cs` (PDF export), `frontend/src/app/features/reports/report-viewer/` (Angular viewer). |
+| Angular 17 + TypeScript | `frontend/`: standalone components, signals, `input()`/`output()`, built-in control flow, `@defer`, functional guards and interceptor, typed reactive forms. |
+| Bootstrap | Bootstrap 5.3 SCSS with a custom theme (`frontend/src/styles.scss`) plus Bootstrap Icons. |
+| VS 2022 | `backend/LedgerFlow.sln` opens directly; the API is the startup project. |
 | Azure DevOps | `azure-pipelines.yml`: build, .NET and Angular tests with a SQL Server service container, coverage, publish, Bicep provisioning, zip deploy, smoke test. |
 
 ## Running locally
@@ -91,7 +148,7 @@ azure-pipelines.yml          Azure DevOps CI/CD
 **Prerequisites:**
 
 - .NET 9 SDK.
-- Node 20 (`web/.nvmrc`).
+- Node 20 (`frontend/.nvmrc`).
 - Docker, for SQL Server.
 - Optional: Visual Studio 2022 17.12 or later on Windows.
 
@@ -106,15 +163,15 @@ azure-pipelines.yml          Azure DevOps CI/CD
 2. **Run the API.** It migrates the database, seeds demo data and starts Hangfire.
 
    ```bash
-   dotnet run --project src/LedgerFlow.Api
+   dotnet run --project backend/src/LedgerFlow.Api
    ```
 
-   The Development connection string in `appsettings.Development.json` matches the compose file. To use another server, run `dotnet user-secrets set ConnectionStrings:LedgerFlow "<connection string>" --project src/LedgerFlow.Api`.
+   The Development connection string in `appsettings.Development.json` matches the compose file. To use another server, run `dotnet user-secrets set ConnectionStrings:LedgerFlow "<connection string>" --project backend/src/LedgerFlow.Api`.
 
 3. **Run the Angular app**
 
    ```bash
-   cd web
+   cd frontend
    npm ci
    npm start        # http://localhost:4200, proxies /api and /hangfire to the API
    ```
@@ -134,13 +191,13 @@ azure-pipelines.yml          Azure DevOps CI/CD
 
 ### Visual Studio 2022
 
-Open `LedgerFlow.sln`, set `LedgerFlow.Api` as the startup project and press F5. Test Explorer picks up both xUnit projects. For the Angular app, run `npm start` in `web/`, or use VS's JavaScript project support if you prefer.
+Open `backend/LedgerFlow.sln`, set `LedgerFlow.Api` as the startup project and press F5. Test Explorer picks up both xUnit projects. For the Angular app, run `npm start` in `frontend/`, or use VS's JavaScript project support if you prefer.
 
 ## Tests
 
 ```bash
-dotnet test                  # 32 unit tests + 19 integration tests
-cd web && npm run test:ci    # 16 Angular tests in headless Chrome
+dotnet test backend/LedgerFlow.sln     # 32 unit tests + 19 integration tests
+cd frontend && npm run test:ci         # 16 Angular tests in headless Chrome
 ```
 
 The integration tests boot the real API with `WebApplicationFactory` against a throwaway database (`LedgerFlow_Tests_<guid>`), which is migrated, seeded and dropped afterwards. They cover:
@@ -167,7 +224,7 @@ Telerik Reporting is commercial. The 30-day trial is free, and the packages come
 To switch Telerik on:
 
 1. Start a Telerik Reporting trial at telerik.com and generate a NuGet API key in your Telerik account.
-2. Export the feed credentials. `nuget.config` reads them from the environment:
+2. Export the feed credentials. `backend/nuget.config` reads them from the environment:
 
    ```bash
    export TELERIK_NUGET_USER=api-key
@@ -175,7 +232,7 @@ To switch Telerik on:
    ```
 
 3. Install your Telerik license key (`telerik-license.txt` from your account, or the `TELERIK_LICENSE` environment variable).
-4. Set `TelerikVersion` in `Directory.Packages.props` to the version on the feed. Keep `TelerikPackageSuffix` as `.Trial` for the trial, or set it empty for a licensed install.
+4. Set `TelerikVersion` in `backend/Directory.Packages.props` to the version on the feed. Keep `TelerikPackageSuffix` as `.Trial` for the trial, or set it empty for a licensed install.
 5. Build and run with `-p:UseTelerik=true`. The Reports page then shows the viewer and PDF links.
 
 > [!NOTE]
